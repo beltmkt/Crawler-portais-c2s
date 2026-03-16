@@ -4,6 +4,7 @@ import requests
 import os
 import sys
 import traceback
+import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from selenium import webdriver
@@ -21,10 +22,10 @@ from datetime import datetime
 # CONFIGURAÇÕES DA API
 # ==============================================
 app = Flask(__name__)
-CORS(app)  # Permite requisições de qualquer origem (n8n, etc)
+CORS(app)  # Permite requisições de qualquer origem
 
 # ==============================================
-# CLASSE SCRAPER (COMPLETA)
+# CLASSE SCRAPER (COMPLETA E CORRIGIDA)
 # ==============================================
 class ChavesScraper:
     def __init__(self, email, senha):
@@ -35,55 +36,154 @@ class ChavesScraper:
         self.xml_output = "imoveis_vivareal.xml"
         
     def setup_driver(self):
-        """Configura o ChromeDriver para o Render (headless)"""
+        """Configura o ChromeDriver para o Render com fallback"""
+        print("🔧 Configurando ChromeDriver...")
+        
         options = Options()
-        options.add_argument("--headless")  # ESSENCIAL para o Render
+        options.add_argument("--headless=new")  # Novo modo headless
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-setuid-sandbox")
+        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument("--ignore-certificate-errors")
+        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=options)
-        self.wait = WebDriverWait(self.driver, 15)
+        # Detectar se está no Render
+        is_render = os.environ.get('RENDER', False) or os.path.exists('/opt/render')
+        
+        try:
+            if is_render:
+                print("📌 Ambiente Render detectado")
+                
+                # Tentar instalar Chrome se não estiver presente
+                try:
+                    subprocess.run(["apt-get", "update"], check=False, capture_output=True)
+                    subprocess.run(["apt-get", "install", "-y", "chromium", "chromium-driver"], 
+                                 check=False, capture_output=True)
+                except:
+                    pass
+                
+                # Verificar caminhos comuns do Chrome
+                chrome_paths = [
+                    "/usr/bin/chromium",
+                    "/usr/bin/chromium-browser",
+                    "/usr/bin/google-chrome",
+                    "/usr/bin/google-chrome-stable"
+                ]
+                
+                chrome_found = False
+                for path in chrome_paths:
+                    if os.path.exists(path):
+                        options.binary_location = path
+                        chrome_found = True
+                        print(f"✅ Chrome encontrado em: {path}")
+                        break
+                
+                if not chrome_found:
+                    print("⚠️ Chrome não encontrado, tentando baixar...")
+                    # Fallback: baixar Chrome
+                    subprocess.run(["wget", "-q", "-O", "/tmp/chrome.deb", 
+                                  "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"], 
+                                 check=False)
+                    subprocess.run(["dpkg", "-i", "/tmp/chrome.deb"], check=False)
+                    subprocess.run(["apt-get", "install", "-f", "-y"], check=False)
+                    options.binary_location = "/usr/bin/google-chrome"
+                
+                # Verificar ChromeDriver
+                driver_paths = [
+                    "/usr/bin/chromedriver",
+                    "/usr/bin/chromium-driver",
+                    "/usr/local/bin/chromedriver"
+                ]
+                
+                driver_found = False
+                for path in driver_paths:
+                    if os.path.exists(path):
+                        service = Service(path)
+                        driver_found = True
+                        print(f"✅ ChromeDriver encontrado em: {path}")
+                        break
+                
+                if not driver_found:
+                    print("⚠️ ChromeDriver não encontrado, instalando...")
+                    subprocess.run(["apt-get", "install", "-y", "chromium-driver"], check=False)
+                    service = Service("/usr/bin/chromium-driver")
+                
+            else:
+                print("📌 Ambiente local detectado")
+                # Localmente, usar webdriver-manager
+                service = Service(ChromeDriverManager().install())
+            
+            # Inicializar o driver
+            if 'service' not in locals():
+                service = Service("/usr/bin/chromedriver")
+            
+            self.driver = webdriver.Chrome(service=service, options=options)
+            self.wait = WebDriverWait(self.driver, 30)  # Timeout maior
+            print("✅ ChromeDriver configurado com sucesso!")
+            
+        except Exception as e:
+            print(f"❌ Erro ao configurar ChromeDriver: {e}")
+            print("🔄 Tentando método alternativo...")
+            
+            # Última tentativa: baixar ChromeDriver automaticamente
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=options)
+                self.wait = WebDriverWait(self.driver, 30)
+                print("✅ ChromeDriver configurado com sucesso (método alternativo)!")
+            except Exception as e2:
+                print(f"❌ Falha completa: {e2}")
+                raise
         
     def login(self):
         """Faz login no site com as credenciais recebidas"""
         print("🔐 Fazendo login...")
-        self.driver.get("https://www.chavesnamao.com.br/entrar/")
-        time.sleep(3)
-        
         try:
-            botao_email = self.wait.until(EC.element_to_be_clickable(
-                (By.CSS_SELECTOR, "span.spacing-1x > button")
+            self.driver.get("https://www.chavesnamao.com.br/entrar/")
+            time.sleep(5)
+            
+            # Tentar clicar no botão de login com email
+            try:
+                botao_email = self.wait.until(EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "span.spacing-1x > button")
+                ))
+                botao_email.click()
+                time.sleep(2)
+            except:
+                print("Botão de email não encontrado, continuando...")
+            
+            # Preencher email
+            campo_email = self.wait.until(EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "#userLogin-input")
             ))
-            botao_email.click()
-            time.sleep(2)
-        except:
-            pass
-        
-        campo_email = self.wait.until(EC.presence_of_element_located(
-            (By.CSS_SELECTOR, "#userLogin-input")
-        ))
-        campo_email.send_keys(self.email)
-        time.sleep(1)
-        
-        campo_senha = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-        campo_senha.send_keys(self.senha)
-        time.sleep(1)
-        
-        try:
-            botao_entrar = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-            botao_entrar.click()
-        except:
-            botao_email.click()
-        
-        time.sleep(5)
-        print("✅ Login realizado!")
+            campo_email.send_keys(self.email)
+            time.sleep(1)
+            
+            # Preencher senha
+            campo_senha = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
+            campo_senha.send_keys(self.senha)
+            time.sleep(1)
+            
+            # Clicar no botão de entrar
+            try:
+                botao_entrar = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+                botao_entrar.click()
+            except:
+                # Se não achar, tentar o botão de email novamente
+                botao_email.click()
+            
+            time.sleep(5)
+            print("✅ Login realizado!")
+            
+        except Exception as e:
+            print(f"❌ Erro no login: {e}")
+            raise
         
     def ir_para_meus_anuncios(self):
         """Acessa a página de meus anúncios"""
@@ -95,6 +195,9 @@ class ChavesScraper:
         """Extrai TODAS as fotos do anúncio usando o padrão sequencial"""
         fotos = []
         
+        if not url_primeira_foto:
+            return fotos
+        
         url_primeira_foto = url_primeira_foto.replace('/0262x0197/', '/1200x0800/')
         url_primeira_foto = url_primeira_foto.replace('/0850x0450/', '/1200x0800/')
         url_primeira_foto = url_primeira_foto.split('?')[0]
@@ -102,34 +205,37 @@ class ChavesScraper:
         match = re.search(r'(.+)-(\d{2})\.jpg', url_primeira_foto)
         if not match:
             fotos.append(url_primeira_foto)
-            return fotos
+            return fotos[:30]
         
         base_url = match.group(1)
         print(f"   📸 Base URL: {base_url}")
         
-        for i in range(100):
+        for i in range(50):  # Limite de 50 fotos para não sobrecarregar
             numero = str(i).zfill(2)
             foto_url = f"{base_url}-{numero}.jpg"
             
             try:
-                response = self.session.head(foto_url, timeout=3)
+                response = self.session.head(foto_url, timeout=5)
                 if response.status_code == 200:
                     fotos.append(foto_url)
                     print(f"      ✅ Foto {i:02d} encontrada")
                 else:
-                    if i > 5 and len(fotos) == i:
+                    if i > 3 and len(fotos) == i:
                         break
             except:
-                if i > 5 and len(fotos) == i:
+                if i > 3 and len(fotos) == i:
                     break
                 continue
         
-        print(f"   📸 Total de {len(fotos)} fotos encontradas via padrão")
+        print(f"   📸 Total de {len(fotos)} fotos encontradas")
         return fotos[:30]
     
     def extrair_caracteristicas_extras(self, texto_pagina):
         """Extrai lista de características adicionais"""
         caracteristicas = []
+        
+        if not texto_pagina:
+            return caracteristicas
         
         linhas = texto_pagina.split('\n')
         keywords = [
@@ -249,7 +355,7 @@ class ChavesScraper:
                 'Batel', 'Capão Raso', 'Juvevê', 'Uberaba', 'Água Verde', 
                 'Campo Comprido', 'Hugo Lange', 'Ecoville', 'Cabral', 'Centro',
                 'Bigorrilho', 'Mercês', 'Boa Vista', 'Cristo Rei', 'Alto da Glória',
-                'Portão', 'Água Verde', 'Rebouças', 'Centro Cívico', 'Jardim Social',
+                'Portão', 'Rebouças', 'Centro Cívico', 'Jardim Social',
                 'Alto da XV', 'São Francisco', 'Bom Retiro', 'Vila Izabel', 'Santa Felicidade'
             ]
             
@@ -259,50 +365,41 @@ class ChavesScraper:
                     break
             
             # ===== CARACTERÍSTICAS =====
-            
-            # Quartos
             q_match = re.search(r'(\d+)\s*quartos?', texto_pagina, re.I)
             if q_match:
                 dados['quartos'] = int(q_match.group(1))
                 print(f"   Quartos: {dados['quartos']}")
             
-            # Suítes
             s_match = re.search(r'(\d+)\s*suítes?', texto_pagina, re.I)
             if s_match:
                 dados['suites'] = int(s_match.group(1))
                 print(f"   Suítes: {dados['suites']}")
             
-            # Banheiros
             b_match = re.search(r'(\d+)\s*banheiros?', texto_pagina, re.I)
             if b_match:
                 dados['banheiros'] = int(b_match.group(1))
                 print(f"   Banheiros: {dados['banheiros']}")
             
-            # Vagas
             v_match = re.search(r'(\d+)\s*vagas?', texto_pagina, re.I)
             if v_match:
                 dados['vagas'] = int(v_match.group(1))
                 print(f"   Vagas: {dados['vagas']}")
             
-            # Área
             a_match = re.search(r'(\d+[.,]?\d*)\s*m[²2]', texto_pagina, re.I)
             if a_match:
                 dados['area_util'] = float(a_match.group(1).replace(',', '.'))
                 print(f"   Área: {dados['area_util']}m²")
             
-            # Condomínio
             c_match = re.search(r'Condom[íi]nio[:\s]*R?\$?\s*([\d.,]+)', texto_pagina, re.I)
             if c_match:
                 dados['condominio'] = c_match.group(1).replace('.', '').replace(',', '.')
                 print(f"   Condomínio: R$ {dados['condominio']}")
             
-            # IPTU
             i_match = re.search(r'IPTU[:\s]*R?\$?\s*([\d.,]+)', texto_pagina, re.I)
             if i_match:
                 dados['iptu'] = i_match.group(1).replace('.', '').replace(',', '.')
                 print(f"   IPTU: R$ {dados['iptu']}")
             
-            # Andar
             andar_match = re.search(r'(\d+)[º°]?\s*andar', texto_pagina, re.I)
             if andar_match:
                 dados['andar'] = andar_match.group(1)
@@ -348,10 +445,13 @@ class ChavesScraper:
             imagens = self.driver.find_elements(By.CSS_SELECTOR, 'img[src*="imoveis/"], img[src*="imn/"]')
             
             for img in imagens:
-                src = img.get_attribute('src')
-                if src and id_anuncio in src and not src.endswith('.png') and not 'logo' in src:
-                    primeira_foto = src
-                    break
+                try:
+                    src = img.get_attribute('src')
+                    if src and id_anuncio in src and not src.endswith('.png') and 'logo' not in src:
+                        primeira_foto = src
+                        break
+                except:
+                    continue
             
             if primeira_foto:
                 dados['fotos'] = self.extrair_fotos_por_padrao(primeira_foto)
@@ -374,7 +474,7 @@ class ChavesScraper:
         for link in links:
             try:
                 url = link.get_attribute('href')
-                if url:
+                if url and url not in urls_anuncios:
                     urls_anuncios.append(url)
                     id_match = re.search(r'/(\d+)/', url)
                     if id_match:
@@ -407,12 +507,13 @@ class ChavesScraper:
                 
             except Exception as e:
                 print(f"❌ Erro no anúncio {i+1}: {e}")
-                self.imoveis.append({
-                    'codigo': id_anuncio if 'id_anuncio' in locals() else str(i+1),
-                    'titulo': f'Imóvel ID {id_anuncio if "id_anuncio" in locals() else i+1}',
-                    'descricao': 'Erro ao carregar dados completos',
-                    'fotos': []
-                })
+                if 'id_anuncio' in locals():
+                    self.imoveis.append({
+                        'codigo': id_anuncio,
+                        'titulo': f'Imóvel ID {id_anuncio}',
+                        'descricao': 'Erro ao carregar dados completos',
+                        'fotos': []
+                    })
                 try:
                     self.driver.get("https://www.chavesnamao.com.br/minhaconta/meusanuncios/")
                 except:
@@ -603,7 +704,10 @@ class ChavesScraper:
         finally:
             print("\n🔚 Finalizando...")
             if hasattr(self, 'driver'):
-                self.driver.quit()
+                try:
+                    self.driver.quit()
+                except:
+                    pass
 
 # ==============================================
 # ENDPOINTS DA API
@@ -649,6 +753,7 @@ def scraper():
         print(f"🚀 Iniciando crawler para: {email}")
         print(f"{'='*60}")
         
+        # Executa o scraper
         scraper = ChavesScraper(email, senha)
         resultado = scraper.run()
         
@@ -673,6 +778,14 @@ def scraper():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint não encontrado'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Erro interno do servidor'}), 500
 
 # ==============================================
 # PONTO DE ENTRADA
