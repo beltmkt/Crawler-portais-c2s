@@ -2,6 +2,10 @@ import time
 import re
 import requests
 import os
+import sys
+import traceback
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -14,22 +18,31 @@ from xml.dom import minidom
 from datetime import datetime
 
 # ==============================================
-# CONFIGURAÇÕES
+# CONFIGURAÇÕES DA API
 # ==============================================
-EMAIL = "planejaimobiliaria@gmail.com"
-SENHA = "18450963"
-XML_OUTPUT = "imoveis_vivareal.xml"
+app = Flask(__name__)
+CORS(app)  # Permite requisições de qualquer origem (n8n, etc)
 
+# ==============================================
+# CLASSE SCRAPER (COMPLETA)
+# ==============================================
 class ChavesScraper:
-    def __init__(self):
-        self.setup_driver()
+    def __init__(self, email, senha):
+        self.email = email
+        self.senha = senha
         self.imoveis = []
         self.session = requests.Session()
+        self.xml_output = "imoveis_vivareal.xml"
         
     def setup_driver(self):
-        """Configura o ChromeDriver"""
+        """Configura o ChromeDriver para o Render (headless)"""
         options = Options()
-        options.add_argument("--start-maximized")
+        options.add_argument("--headless")  # ESSENCIAL para o Render
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -39,7 +52,7 @@ class ChavesScraper:
         self.wait = WebDriverWait(self.driver, 15)
         
     def login(self):
-        """Faz login no site"""
+        """Faz login no site com as credenciais recebidas"""
         print("🔐 Fazendo login...")
         self.driver.get("https://www.chavesnamao.com.br/entrar/")
         time.sleep(3)
@@ -56,11 +69,11 @@ class ChavesScraper:
         campo_email = self.wait.until(EC.presence_of_element_located(
             (By.CSS_SELECTOR, "#userLogin-input")
         ))
-        campo_email.send_keys(EMAIL)
+        campo_email.send_keys(self.email)
         time.sleep(1)
         
         campo_senha = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-        campo_senha.send_keys(SENHA)
+        campo_senha.send_keys(self.senha)
         time.sleep(1)
         
         try:
@@ -235,7 +248,9 @@ class ChavesScraper:
             bairros_conhecidos = [
                 'Batel', 'Capão Raso', 'Juvevê', 'Uberaba', 'Água Verde', 
                 'Campo Comprido', 'Hugo Lange', 'Ecoville', 'Cabral', 'Centro',
-                'Bigorrilho', 'Mercês', 'Boa Vista', 'Cristo Rei', 'Alto da Glória'
+                'Bigorrilho', 'Mercês', 'Boa Vista', 'Cristo Rei', 'Alto da Glória',
+                'Portão', 'Água Verde', 'Rebouças', 'Centro Cívico', 'Jardim Social',
+                'Alto da XV', 'São Francisco', 'Bom Retiro', 'Vila Izabel', 'Santa Felicidade'
             ]
             
             for bairro in bairros_conhecidos:
@@ -383,7 +398,6 @@ class ChavesScraper:
                 
                 dados = self.extrair_dados_completos(id_anuncio)
                 
-                # SEMPRE adicionar o anúncio, mesmo com dados parciais
                 self.imoveis.append(dados)
                 print(f"   ✅ Anúncio ADICIONADO! Total na lista: {len(self.imoveis)}")
                 
@@ -393,7 +407,6 @@ class ChavesScraper:
                 
             except Exception as e:
                 print(f"❌ Erro no anúncio {i+1}: {e}")
-                # Adicionar anúncio com dados básicos mesmo em caso de erro
                 self.imoveis.append({
                     'codigo': id_anuncio if 'id_anuncio' in locals() else str(i+1),
                     'titulo': f'Imóvel ID {id_anuncio if "id_anuncio" in locals() else i+1}',
@@ -412,7 +425,7 @@ class ChavesScraper:
         
         if len(self.imoveis) == 0:
             print("❌ Nenhum anúncio para gerar XML!")
-            return
+            return None
         
         now = datetime.now()
         publish_date = now.strftime("%Y-%m-%dT%H:%M:%S")
@@ -424,8 +437,8 @@ class ChavesScraper:
         
         header = ET.SubElement(root, "Header")
         ET.SubElement(header, "PublishDate").text = publish_date
-        ET.SubElement(header, "Provider").text = "PLANEJA NEGÓCIOS IMOBILIÁRIOS"
-        ET.SubElement(header, "Email").text = EMAIL
+        ET.SubElement(header, "Provider").text = self.email.split('@')[0].upper() + " NEGÓCIOS IMOBILIÁRIOS"
+        ET.SubElement(header, "Email").text = self.email
         
         listings = ET.SubElement(root, "Listings")
         total_fotos = 0
@@ -439,7 +452,6 @@ class ChavesScraper:
             ET.SubElement(listing, "ListDate").text = list_date
             ET.SubElement(listing, "LastUpdateDate").text = list_date
             
-            # Determinar TransactionType baseado no preço
             if imovel.get('preco_venda'):
                 ET.SubElement(listing, "TransactionType").text = "For Sale"
             elif imovel.get('preco_locacao'):
@@ -537,10 +549,10 @@ class ChavesScraper:
             contact = ET.SubElement(listing, "ContactInfo")
             
             contact_email = ET.SubElement(contact, "Email")
-            contact_email.text = EMAIL
+            contact_email.text = self.email
             
             contact_name = ET.SubElement(contact, "Name")
-            contact_name.text = "PLANEJA NEGÓCIOS IMOBILIÁRIOS"
+            contact_name.text = self.email.split('@')[0].upper() + " NEGÓCIOS IMOBILIÁRIOS"
             
             contact_phone = ET.SubElement(contact, "Telephone")
             contact_phone.text = "(41) 3092-1001"
@@ -552,38 +564,119 @@ class ChavesScraper:
             status_date = ET.SubElement(status, "StatusDate")
             status_date.text = now.strftime('%d/%m/%Y')
         
-        # Salvar XML
         xml_str = ET.tostring(root, encoding="unicode")
         xml_pretty = minidom.parseString(xml_str).toprettyxml(indent="  ")
         xml_pretty = '\n'.join([line for line in xml_pretty.split('\n') if line.strip()])
         
-        caminho_completo = os.path.join(os.getcwd(), XML_OUTPUT)
-        with open(XML_OUTPUT, "w", encoding="utf-8") as f:
-            f.write(xml_pretty)
-        
         print(f"\n{'='*60}")
         print(f"✅ XML gerado com SUCESSO!")
-        print(f"📁 Local: {caminho_completo}")
         print(f"📊 Total de anúncios: {len(self.imoveis)}")
         print(f"📸 Total de fotos: {total_fotos}")
         print(f"{'='*60}")
+        
+        return xml_pretty
     
     def run(self):
+        """Executa todo o processo e retorna o XML"""
         try:
+            self.setup_driver()
             self.login()
             self.ir_para_meus_anuncios()
             self.processar_todos_anuncios()
-            self.gerar_xml()
-            print(f"\n📊 RESUMO FINAL: {len(self.imoveis)} anúncios processados")
-            input("\n⏸️  Pressione Enter para fechar...")
+            xml_content = self.gerar_xml()
+            
+            return {
+                'success': True,
+                'total_anuncios': len(self.imoveis),
+                'xml': xml_content
+            }
+            
         except Exception as e:
             print(f"\n❌ Erro: {e}")
-            import traceback
             traceback.print_exc()
+            return {
+                'success': False,
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }
+            
         finally:
             print("\n🔚 Finalizando...")
-            self.driver.quit()
+            if hasattr(self, 'driver'):
+                self.driver.quit()
 
-if __name__ == "__main__":
-    scraper = ChavesScraper()
-    scraper.run()
+# ==============================================
+# ENDPOINTS DA API
+# ==============================================
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        'status': 'online',
+        'message': 'API do Crawler Chaves na Mão',
+        'endpoints': {
+            '/scraper': 'POST - Executa o crawler (enviar JSON com email e senha)',
+            '/health': 'GET - Verifica status'
+        }
+    })
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/scraper', methods=['POST'])
+def scraper():
+    """Endpoint principal para executar o crawler"""
+    try:
+        data = request.json
+        
+        if not data:
+            return jsonify({'error': 'JSON inválido ou não fornecido'}), 400
+        
+        email = data.get('email')
+        senha = data.get('senha')
+        
+        if not email or not senha:
+            return jsonify({
+                'error': 'Email e senha são obrigatórios',
+                'received': data
+            }), 400
+        
+        print(f"\n{'='*60}")
+        print(f"🚀 Iniciando crawler para: {email}")
+        print(f"{'='*60}")
+        
+        scraper = ChavesScraper(email, senha)
+        resultado = scraper.run()
+        
+        if resultado['success']:
+            return jsonify({
+                'success': True,
+                'total_anuncios': resultado['total_anuncios'],
+                'xml': resultado['xml'],
+                'message': f'{resultado["total_anuncios"]} anúncios processados com sucesso'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': resultado['error'],
+                'traceback': resultado.get('traceback', '')
+            }), 500
+            
+    except Exception as e:
+        print(f"❌ Erro na API: {e}")
+        traceback.print_exc()
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+# ==============================================
+# PONTO DE ENTRADA
+# ==============================================
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
