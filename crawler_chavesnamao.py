@@ -1,3 +1,4 @@
+# Substitua o conteúdo do arquivo atual
 import time
 import re
 import requests
@@ -24,7 +25,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ==============================================
-# CLASSE SCRAPER (VERSÃO SIMPLIFICADA)
+# CLASSE SCRAPER (CORRIGIDA)
 # ==============================================
 class ChavesScraper:
     def __init__(self, email, senha):
@@ -34,7 +35,7 @@ class ChavesScraper:
         self.session = requests.Session()
         
     def setup_driver(self):
-        """Configura o ChromeDriver de forma SIMPLES para o Render"""
+        """Configura o ChromeDriver usando caminhos absolutos"""
         print("🔧 Configurando ChromeDriver...")
         
         options = Options()
@@ -45,48 +46,71 @@ class ChavesScraper:
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--remote-debugging-port=9222")
         options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--ignore-certificate-errors")
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         
-        # No Render, o Chromium está neste caminho
-        options.binary_location = "/usr/bin/chromium"
+        # Caminhos absolutos no Render
+        chrome_paths = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser"
+        ]
         
-        # Caminho fixo do ChromeDriver no Render
-        service = Service("/usr/bin/chromedriver")
+        driver_paths = [
+            "/usr/local/bin/chromedriver",
+            "/usr/bin/chromedriver",
+            "/usr/bin/chromium-driver"
+        ]
         
-        try:
-            self.driver = webdriver.Chrome(service=service, options=options)
-            self.wait = WebDriverWait(self.driver, 30)
-            print("✅ ChromeDriver configurado com sucesso!")
-        except Exception as e:
-            print(f"❌ Erro na primeira tentativa: {e}")
-            print("🔄 Tentando caminho alternativo...")
-            
-            # Segunda tentativa com caminhos alternativos
-            chrome_paths = [
-                "/usr/bin/chromium-browser",
-                "/usr/bin/google-chrome",
-                "/usr/bin/google-chrome-stable"
-            ]
-            
-            driver_paths = [
-                "/usr/bin/chromium-driver",
-                "/usr/local/bin/chromedriver",
-                "/usr/bin/chromedriver"
-            ]
-            
-            for chrome_path in chrome_paths:
-                for driver_path in driver_paths:
-                    try:
-                        options.binary_location = chrome_path
-                        service = Service(driver_path)
-                        self.driver = webdriver.Chrome(service=service, options=options)
-                        self.wait = WebDriverWait(self.driver, 30)
-                        print(f"✅ Sucesso com Chrome: {chrome_path} e Driver: {driver_path}")
-                        return
-                    except:
-                        continue
-            
-            raise Exception("Não foi possível configurar o ChromeDriver")
+        # Encontra o Chrome
+        chrome_binary = None
+        for path in chrome_paths:
+            if os.path.exists(path):
+                chrome_binary = path
+                print(f"✅ Chrome encontrado em: {path}")
+                break
+        
+        if not chrome_binary:
+            # Tenta encontrar com which
+            try:
+                chrome_binary = subprocess.check_output(["which", "google-chrome"], text=True).strip()
+                if chrome_binary:
+                    print(f"✅ Chrome encontrado via which: {chrome_binary}")
+            except:
+                pass
+        
+        if not chrome_binary:
+            raise Exception("Chrome não encontrado. Verifique a instalação.")
+        
+        options.binary_location = chrome_binary
+        
+        # Encontra o ChromeDriver
+        chromedriver_binary = None
+        for path in driver_paths:
+            if os.path.exists(path):
+                chromedriver_binary = path
+                print(f"✅ ChromeDriver encontrado em: {path}")
+                break
+        
+        if not chromedriver_binary:
+            # Tenta encontrar com which
+            try:
+                chromedriver_binary = subprocess.check_output(["which", "chromedriver"], text=True).strip()
+                if chromedriver_binary:
+                    print(f"✅ ChromeDriver encontrado via which: {chromedriver_binary}")
+            except:
+                pass
+        
+        if not chromedriver_binary:
+            raise Exception("ChromeDriver não encontrado. Verifique a instalação.")
+        
+        # Inicializa o driver
+        service = Service(chromedriver_binary)
+        self.driver = webdriver.Chrome(service=service, options=options)
+        self.wait = WebDriverWait(self.driver, 30)
+        print("✅ Driver configurado com sucesso!")
     
     def login(self):
         """Faz login no site"""
@@ -137,57 +161,16 @@ class ChavesScraper:
         self.driver.get("https://www.chavesnamao.com.br/minhaconta/meusanuncios/")
         time.sleep(5)
     
-    def extrair_fotos_por_padrao(self, url_primeira_foto):
-        """Extrai fotos do anúncio"""
-        fotos = []
-        if not url_primeira_foto:
-            return fotos
-        
-        url_primeira_foto = url_primeira_foto.split('?')[0]
-        match = re.search(r'(.+)-(\d{2})\.jpg', url_primeira_foto)
-        
-        if not match:
-            fotos.append(url_primeira_foto)
-            return fotos[:10]
-        
-        base_url = match.group(1)
-        print(f"   📸 Base URL: {base_url}")
-        
-        for i in range(20):
-            numero = str(i).zfill(2)
-            foto_url = f"{base_url}-{numero}.jpg"
-            
-            try:
-                response = self.session.head(foto_url, timeout=3)
-                if response.status_code == 200:
-                    fotos.append(foto_url)
-                    print(f"      ✅ Foto {i:02d} encontrada")
-                else:
-                    if i > 3 and len(fotos) == i:
-                        break
-            except:
-                if i > 3 and len(fotos) == i:
-                    break
-                continue
-        
-        print(f"   📸 Total de {len(fotos)} fotos encontradas")
-        return fotos[:20]
-    
     def extrair_dados_basicos(self, id_anuncio):
-        """Extrai dados básicos do anúncio (versão simplificada)"""
+        """Extrai dados básicos do anúncio"""
         print(f"\n📂 Processando anúncio ID: {id_anuncio}")
         
         dados = {
             'codigo': id_anuncio,
             'titulo': '',
-            'descricao': '',
-            'tipo': 'Apartamento',
             'preco_venda': '',
-            'cidade': 'Curitiba',
             'bairro': '',
             'quartos': 0,
-            'banheiros': 0,
-            'vagas': 0,
             'area_util': 0,
             'fotos': []
         }
@@ -212,72 +195,53 @@ class ChavesScraper:
                 valor = preco_match.group(1).replace('.', '').replace(',', '.')
                 if re.match(r'^\d+\.?\d*$', valor):
                     dados['preco_venda'] = valor
-                    print(f"   Preço: R$ {dados['preco_venda']}")
+            
+            # Bairro
+            bairros = ['Batel', 'Água Verde', 'Centro', 'Bigorrilho', 'Mercês', 'Juvevê']
+            for bairro in bairros:
+                if bairro in texto_pagina:
+                    dados['bairro'] = bairro
+                    break
             
             # Quartos
             q_match = re.search(r'(\d+)\s*quartos?', texto_pagina, re.I)
             if q_match:
                 dados['quartos'] = int(q_match.group(1))
             
-            # Banheiros
-            b_match = re.search(r'(\d+)\s*banheiros?', texto_pagina, re.I)
-            if b_match:
-                dados['banheiros'] = int(b_match.group(1))
-            
-            # Vagas
-            v_match = re.search(r'(\d+)\s*vagas?', texto_pagina, re.I)
-            if v_match:
-                dados['vagas'] = int(v_match.group(1))
-            
             # Área
             a_match = re.search(r'(\d+[.,]?\d*)\s*m[²2]', texto_pagina, re.I)
             if a_match:
                 dados['area_util'] = float(a_match.group(1).replace(',', '.'))
             
-            # Fotos
-            imagens = self.driver.find_elements(By.CSS_SELECTOR, 'img[src*="imoveis/"], img[src*="imn/"]')
-            for img in imagens[:5]:  # Limite de 5 fotos
+            # Fotos (apenas a primeira)
+            imagens = self.driver.find_elements(By.CSS_SELECTOR, 'img[src*="imoveis/"]')
+            for img in imagens[:3]:
                 try:
                     src = img.get_attribute('src')
-                    if src and id_anuncio in src:
-                        dados['fotos'].append(src)
-                        if len(dados['fotos']) >= 5:
-                            break
+                    if src:
+                        dados['fotos'].append(src.split('?')[0])
                 except:
                     continue
-            
-            dados['descricao'] = dados['titulo']
             
         except Exception as e:
             print(f"❌ Erro no anúncio {id_anuncio}: {e}")
         
         return dados
     
-    def processar_todos_anuncios(self):
-        """Processa todos os anúncios da lista"""
-        print("\n🔍 Procurando anúncios...")
+    def processar_anuncios(self):
+        """Processa os anúncios da lista"""
+        print("\n🔍 Buscando anúncios...")
         time.sleep(3)
         
-        urls_anuncios = []
-        links = self.driver.find_elements(By.CSS_SELECTOR, 'h2.anuncio-titulo a')
+        links = self.driver.find_elements(By.CSS_SELECTOR, 'h2.anuncio-titulo a')[:3]  # Limite de 3
         
-        for link in links[:5]:  # Limite de 5 anúncios para teste
+        for i, link in enumerate(links):
             try:
                 url = link.get_attribute('href')
-                if url:
-                    urls_anuncios.append(url)
-                    id_match = re.search(r'/(\d+)/', url)
-                    if id_match:
-                        print(f"   URL encontrada: ID {id_match.group(1)}")
-            except:
-                continue
-        
-        print(f"📊 Total de {len(urls_anuncios)} URLs coletadas")
-        
-        for i, url in enumerate(urls_anuncios):
-            print(f"\n⏳ Processando anúncio {i+1}/{len(urls_anuncios)}")
-            
-            try:
+                if not url:
+                    continue
+                
+                print(f"\n⏳ Processando anúncio {i+1}")
                 self.driver.get(url)
                 time.sleep(5)
                 
@@ -286,7 +250,6 @@ class ChavesScraper:
                 
                 dados = self.extrair_dados_basicos(id_anuncio)
                 self.imoveis.append(dados)
-                print(f"   ✅ Anúncio adicionado!")
                 
                 self.driver.get("https://www.chavesnamao.com.br/minhaconta/meusanuncios/")
                 time.sleep(3)
@@ -296,13 +259,9 @@ class ChavesScraper:
                 continue
     
     def gerar_xml_simples(self):
-        """Gera XML simples com os dados coletados"""
-        print("\n📄 Gerando XML...")
-        
-        if len(self.imoveis) == 0:
+        """Gera XML simples"""
+        if not self.imoveis:
             return None
-        
-        now = datetime.now()
         
         root = ET.Element("ListingDataFeed")
         root.set("xmlns", "http://www.vivareal.com/schemas/1.0/VRSync")
@@ -315,33 +274,19 @@ class ChavesScraper:
         
         for imovel in self.imoveis:
             listing = ET.SubElement(listings, "Listing")
-            ET.SubElement(listing, "ListingID").text = str(imovel.get('codigo', ''))
+            ET.SubElement(listing, "ListingID").text = imovel.get('codigo', '')
             ET.SubElement(listing, "Title").text = imovel.get('titulo', '')
-            ET.SubElement(listing, "TransactionType").text = "For Sale"
-            
-            location = ET.SubElement(listing, "Location")
-            ET.SubElement(location, "City").text = imovel.get('cidade', 'Curitiba')
-            if imovel.get('bairro'):
-                ET.SubElement(location, "Neighborhood").text = imovel['bairro']
-            
-            details = ET.SubElement(listing, "Details")
-            ET.SubElement(details, "Description").text = imovel.get('descricao', '')
             
             if imovel.get('preco_venda'):
-                ET.SubElement(details, "SalePrice", currency="BRL").text = imovel['preco_venda']
+                ET.SubElement(listing, "SalePrice", currency="BRL").text = imovel['preco_venda']
             
+            details = ET.SubElement(listing, "Details")
             ET.SubElement(details, "Bedrooms").text = str(imovel.get('quartos', 0))
-            ET.SubElement(details, "Bathrooms").text = str(imovel.get('banheiros', 0))
-            ET.SubElement(details, "ParkingSpaces").text = str(imovel.get('vagas', 0))
-            
-            if imovel.get('area_util') > 0:
-                ET.SubElement(details, "LivingArea", unit="square metres").text = str(imovel['area_util'])
             
             if imovel.get('fotos'):
                 media = ET.SubElement(listing, "Media")
-                for foto in imovel['fotos'][:5]:
-                    item = ET.SubElement(media, "Item", medium="image")
-                    item.text = foto
+                for foto in imovel['fotos']:
+                    ET.SubElement(media, "Item", medium="image").text = foto
             
             contact = ET.SubElement(listing, "ContactInfo")
             ET.SubElement(contact, "Email").text = self.email
@@ -349,12 +294,12 @@ class ChavesScraper:
         return ET.tostring(root, encoding="unicode")
     
     def run(self):
-        """Executa todo o processo"""
+        """Executa o scraper"""
         try:
             self.setup_driver()
             self.login()
             self.ir_para_meus_anuncios()
-            self.processar_todos_anuncios()
+            self.processar_anuncios()
             xml_content = self.gerar_xml_simples()
             
             return {
@@ -368,8 +313,7 @@ class ChavesScraper:
             traceback.print_exc()
             return {
                 'success': False,
-                'error': str(e),
-                'traceback': traceback.format_exc()
+                'error': str(e)
             }
             
         finally:
@@ -423,3 +367,6 @@ def scraper():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+'@ | Out-File -FilePath "crawler_chavesnamao.py" -Encoding UTF8 -Force
+
+Write-Host "✅ crawler_chavesnamao.py atualizado!" -ForegroundColor Green
