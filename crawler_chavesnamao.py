@@ -11,8 +11,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.firefox.service import Service
+from selenium.webdriver.firefox.options import Options
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from datetime import datetime
@@ -21,10 +21,10 @@ from datetime import datetime
 # CONFIGURAÇÕES DA API
 # ==============================================
 app = Flask(__name__)
-CORS(app)  # Permite requisições de qualquer origem
+CORS(app)
 
 # ==============================================
-# CLASSE SCRAPER (COMPLETA E CORRIGIDA PARA RENDER)
+# CLASSE SCRAPER (COMPLETA COM FIREFOX)
 # ==============================================
 class ChavesScraper:
     def __init__(self, email, senha):
@@ -35,96 +35,86 @@ class ChavesScraper:
         self.xml_output = "imoveis_vivareal.xml"
         
     def setup_driver(self):
-        """Configura o ChromeDriver para o Render sem usar webdriver-manager"""
-        print("🔧 Configurando ChromeDriver...")
+        """Configura o Firefox Driver para o Render"""
+        print("🔧 Configurando Firefox...")
         
         options = Options()
-        options.add_argument("--headless=new")  # Novo modo headless
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        options.add_argument("--headless")
+        options.add_argument("--width=1920")
+        options.add_argument("--height=1080")
         
         # ===== CAMINHOS PARA O RENDER (COM CACHE) =====
         cache_dir = "/opt/render/project/.render"
         
-        # Possíveis localizações do Chrome (prioridade para o cache)
-        chrome_paths = [
-            f"{cache_dir}/chrome/chrome-linux64/chrome",  # Chrome baixado pelo build script
-            "/usr/bin/google-chrome",
-            "/usr/bin/google-chrome-stable",
-            "/usr/bin/chromium",
-            "/usr/bin/chromium-browser"
+        # Possíveis localizações do Firefox
+        firefox_paths = [
+            f"{cache_dir}/firefox/firefox",
+            "/usr/bin/firefox",
+            "/usr/bin/firefox-esr"
         ]
         
-        # Possíveis localizações do ChromeDriver
-        chromedriver_paths = [
-            f"{cache_dir}/chromedriver/chromedriver",  # ChromeDriver baixado pelo build script
-            "/usr/local/bin/chromedriver",
-            "/usr/bin/chromedriver",
-            "/usr/bin/chromium-driver"
+        # Possíveis localizações do GeckoDriver
+        geckodriver_paths = [
+            f"{cache_dir}/geckodriver/geckodriver",
+            "/usr/local/bin/geckodriver",
+            "/usr/bin/geckodriver"
         ]
         
-        # Encontrar o Chrome
-        chrome_binary = None
-        for path in chrome_paths:
+        # Encontrar o Firefox
+        firefox_binary = None
+        for path in firefox_paths:
             if os.path.exists(path):
-                chrome_binary = path
-                print(f"✅ Chrome encontrado em: {path}")
-                options.binary_location = chrome_binary
+                firefox_binary = path
+                print(f"✅ Firefox encontrado em: {path}")
+                options.binary_location = firefox_binary
                 break
         
-        if not chrome_binary:
-            print("⚠️ Chrome não encontrado, tentando localizar com 'which'...")
+        if not firefox_binary:
+            print("⚠️ Firefox não encontrado, tentando localizar com 'which'...")
             try:
-                chrome_binary = subprocess.check_output(["which", "google-chrome"], text=True).strip()
-                if chrome_binary:
-                    print(f"✅ Chrome encontrado via which: {chrome_binary}")
-                    options.binary_location = chrome_binary
+                firefox_binary = subprocess.check_output(["which", "firefox"], text=True).strip()
+                if firefox_binary:
+                    print(f"✅ Firefox encontrado via which: {firefox_binary}")
+                    options.binary_location = firefox_binary
             except:
                 pass
         
-        if not chrome_binary:
-            print("❌ Chrome não encontrado. Verifique a instalação.")
-            raise Exception("Chrome não encontrado")
+        if not firefox_binary:
+            print("❌ Firefox não encontrado. Verifique a instalação.")
+            raise Exception("Firefox não encontrado")
         
-        # Encontrar o ChromeDriver
-        chromedriver_binary = None
-        for path in chromedriver_paths:
+        # Encontrar o GeckoDriver
+        geckodriver_binary = None
+        for path in geckodriver_paths:
             if os.path.exists(path):
-                chromedriver_binary = path
-                print(f"✅ ChromeDriver encontrado em: {path}")
+                geckodriver_binary = path
+                print(f"✅ GeckoDriver encontrado em: {path}")
                 break
         
-        if not chromedriver_binary:
-            print("⚠️ ChromeDriver não encontrado, tentando localizar com 'which'...")
+        if not geckodriver_binary:
+            print("⚠️ GeckoDriver não encontrado, tentando localizar com 'which'...")
             try:
-                chromedriver_binary = subprocess.check_output(["which", "chromedriver"], text=True).strip()
-                if chromedriver_binary:
-                    print(f"✅ ChromeDriver encontrado via which: {chromedriver_binary}")
+                geckodriver_binary = subprocess.check_output(["which", "geckodriver"], text=True).strip()
+                if geckodriver_binary:
+                    print(f"✅ GeckoDriver encontrado via which: {geckodriver_binary}")
             except:
                 pass
         
-        if not chromedriver_binary:
-            print("❌ ChromeDriver não encontrado. Tentando baixar automaticamente...")
+        if not geckodriver_binary:
+            print("❌ GeckoDriver não encontrado. Tentando baixar automaticamente...")
             try:
-                # Fallback: webdriver-manager (último recurso)
-                from webdriver_manager.chrome import ChromeDriverManager
-                chromedriver_binary = ChromeDriverManager().install()
-                print(f"✅ ChromeDriver baixado via webdriver-manager: {chromedriver_binary}")
+                from webdriver_manager.firefox import GeckoDriverManager
+                geckodriver_binary = GeckoDriverManager().install()
+                print(f"✅ GeckoDriver baixado via webdriver-manager: {geckodriver_binary}")
             except Exception as e:
-                print(f"❌ Erro ao baixar ChromeDriver: {e}")
-                raise Exception("Não foi possível configurar o ChromeDriver")
+                print(f"❌ Erro ao baixar GeckoDriver: {e}")
+                raise Exception("Não foi possível configurar o GeckoDriver")
         
         # Inicializar o driver
-        service = Service(chromedriver_binary)
-        self.driver = webdriver.Chrome(service=service, options=options)
+        service = Service(geckodriver_binary)
+        self.driver = webdriver.Firefox(service=service, options=options)
         self.wait = WebDriverWait(self.driver, 15)
-        print("✅ Driver configurado com sucesso!")
+        print("✅ Firefox configurado com sucesso!")
         
     def login(self):
         """Faz login no site com as credenciais recebidas"""
@@ -484,12 +474,13 @@ class ChavesScraper:
                 
             except Exception as e:
                 print(f"❌ Erro no anúncio {i+1}: {e}")
-                self.imoveis.append({
-                    'codigo': id_anuncio if 'id_anuncio' in locals() else str(i+1),
-                    'titulo': f'Imóvel ID {id_anuncio if "id_anuncio" in locals() else i+1}',
-                    'descricao': 'Erro ao carregar dados completos',
-                    'fotos': []
-                })
+                if 'id_anuncio' in locals():
+                    self.imoveis.append({
+                        'codigo': id_anuncio,
+                        'titulo': f'Imóvel ID {id_anuncio}',
+                        'descricao': 'Erro ao carregar dados completos',
+                        'fotos': []
+                    })
                 try:
                     self.driver.get("https://www.chavesnamao.com.br/minhaconta/meusanuncios/")
                 except:
@@ -726,8 +717,8 @@ def scraper():
         print(f"🚀 Iniciando crawler para: {email}")
         print(f"{'='*60}")
         
-        scraper = ChavesScraper(email, senha)
-        resultado = scraper.run()
+        scraper_instance = ChavesScraper(email, senha)
+        resultado = scraper_instance.run()
         
         if resultado['success']:
             return jsonify({
@@ -750,6 +741,14 @@ def scraper():
             'error': str(e),
             'traceback': traceback.format_exc()
         }), 500
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Endpoint não encontrado'}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Erro interno do servidor'}), 500
 
 # ==============================================
 # PONTO DE ENTRADA
