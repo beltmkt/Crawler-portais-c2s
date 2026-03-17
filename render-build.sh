@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# render-build.sh - Script de build para instalar Chrome
+# render-build.sh - Instala Chrome e dependências
 
 echo "🚀 Iniciando build script..."
 
+# Atualiza pacotes
+apt-get update
+
 # Instala dependências do Chrome
-apt-get update && apt-get install -y \
+apt-get install -y \
     wget \
     gnupg \
     unzip \
@@ -49,23 +52,34 @@ wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stab
 dpkg -i /tmp/chrome.deb || apt-get install -f -y
 rm /tmp/chrome.deb
 
-# Instala ChromeDriver
+# Verifica instalação
+echo "✅ Chrome instalado em: $(which google-chrome)"
+google-chrome --version
+
+# Baixa ChromeDriver compatível
 echo "📦 Baixando ChromeDriver..."
 CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+' | head -1)
-CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION")
+echo "📌 Versão do Chrome detectada: $CHROME_VERSION"
 
-if [ -z "$CHROMEDRIVER_VERSION" ]; then
+# Tenta baixar ChromeDriver da versão específica
+CHROMEDRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip"
+wget -q -O /tmp/chromedriver.zip $CHROMEDRIVER_URL || {
     echo "⚠️ Versão específica não encontrada, baixando a última estável..."
-    CHROMEDRIVER_VERSION=$(curl -s https://chromedriver.storage.googleapis.com/LATEST_RELEASE)
-fi
+    CHROMEDRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chromedriver-linux64.zip"
+    wget -q -O /tmp/chromedriver.zip $CHROMEDRIVER_URL
+}
 
-wget -q -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip"
-unzip -o /tmp/chromedriver.zip -d /usr/local/bin/
+unzip -o /tmp/chromedriver.zip -d /tmp/
+mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/
 chmod +x /usr/local/bin/chromedriver
-rm /tmp/chromedriver.zip
+rm -rf /tmp/chromedriver*
+
+# Verifica instalação
+echo "✅ ChromeDriver instalado em: $(which chromedriver)"
+chromedriver --version
 
 # Instala dependências Python
 echo "📦 Instalando dependências Python..."
 pip install -r requirements.txt
 
-echo "✅ Build concluído!"
+echo "✅ Build concluído com sucesso!"
