@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# render-build.sh - Instala Chrome e dependências
+# render-build.sh - Instala Chrome e dependências no Render
 
 echo "🚀 Iniciando build script..."
 
@@ -62,12 +62,8 @@ CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+' | head -1)
 echo "📌 Versão do Chrome detectada: $CHROME_VERSION"
 
 # Tenta baixar ChromeDriver da versão específica
-CHROMEDRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip"
-wget -q -O /tmp/chromedriver.zip $CHROMEDRIVER_URL || {
-    echo "⚠️ Versão específica não encontrada, baixando a última estável..."
-    CHROMEDRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chromedriver-linux64.zip"
-    wget -q -O /tmp/chromedriver.zip $CHROMEDRIVER_URL
-}
+wget -q -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip" || \
+wget -q -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chromedriver-linux64.zip"
 
 unzip -o /tmp/chromedriver.zip -d /tmp/
 mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/
