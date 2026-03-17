@@ -1,26 +1,18 @@
 #!/usr/bin/env bash
 set -o errexit
 
-CACHE_DIR=/opt/render/project/.render
+echo "🚀 Instalando Firefox..."
 
-# Baixa Chrome
-if [ ! -f $CACHE_DIR/chrome/chrome-linux64/chrome ]; then
-  echo "📦 Baixando Chrome..."
-  mkdir -p $CACHE_DIR/chrome
-  cd $CACHE_DIR/chrome
-  wget -q https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chrome-linux64.zip
-  unzip -q chrome-linux64.zip
-  rm chrome-linux64.zip
-  cd ~
-fi
+# Instala Firefox via apt (muito mais simples!)
+apt-get update
+apt-get install -y firefox-esr  # ou firefox
 
-# Baixa ChromeDriver
-if [ ! -f $CACHE_DIR/chromedriver/chromedriver ]; then
-  echo "📦 Baixando ChromeDriver..."
-  mkdir -p $CACHE_DIR/chromedriver
-  cd $CACHE_DIR/chromedriver
-  wget -q https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chromedriver-linux64.zip
-  unzip -q chromedriver-linux64.zip
-  rm chromedriver-linux64.zip
-  mv chromedriver-linux64/chromedriver .
-  rm -rf
+# Baixa GeckoDriver
+GECKO_VERSION=$(curl -s https://api.github.com/repos/mozilla/geckodriver/releases/latest | grep tag_name | cut -d '"' -f 4)
+wget -q -O /tmp/geckodriver.tar.gz "https://github.com/mozilla/geckodriver/releases/download/$GECKO_VERSION/geckodriver-$GECKO_VERSION-linux64.tar.gz"
+tar -xzf /tmp/geckodriver.tar.gz -C /usr/local/bin/
+chmod +x /usr/local/bin/geckodriver
+
+echo "✅ Firefox e GeckoDriver instalados!"
+firefox --version
+geckodriver --version
