@@ -1,23 +1,36 @@
 #!/usr/bin/env bash
-echo "🚀 Iniciando build script..."
+# render-build.sh - Versão que não usa apt-get
+set -o errexit
 
-# Instala Chrome
-apt-get update
-apt-get install -y wget gnupg unzip curl
+# Diretório para cache
+CACHE_DIR=/opt/render/project/.render
 
-# Baixa e instala Chrome
-wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-dpkg -i /tmp/chrome.deb || apt-get install -f -y
-rm /tmp/chrome.deb
+# Baixa Chrome (apenas se não estiver em cache)
+if [ ! -f $CACHE_DIR/chrome/chrome ]; then
+  echo "📦 Baixando Chrome..."
+  mkdir -p $CACHE_DIR/chrome
+  cd $CACHE_DIR/chrome
+  wget -q https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chrome-linux64.zip
+  unzip -q chrome-linux64.zip
+  rm chrome-linux64.zip
+  cd ~
+fi
 
-# Instala ChromeDriver
-CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
-wget -q -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip"
-unzip -o /tmp/chromedriver.zip -d /tmp/
-mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/
-chmod +x /usr/local/bin/chromedriver
+# Baixa ChromeDriver (apenas se não estiver em cache)
+if [ ! -f $CACHE_DIR/chromedriver/chromedriver ]; then
+  echo "📦 Baixando ChromeDriver..."
+  mkdir -p $CACHE_DIR/chromedriver
+  cd $CACHE_DIR/chromedriver
+  wget -q https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chromedriver-linux64.zip
+  unzip -q chromedriver-linux64.zip
+  rm chromedriver-linux64.zip
+  mv chromedriver-linux64/chromedriver .
+  rm -rf chromedriver-linux64
+  cd ~
+fi
 
 # Instala dependências Python
+echo "📦 Instalando dependências Python..."
 pip install -r requirements.txt
 
 echo "✅ Build concluído!"
