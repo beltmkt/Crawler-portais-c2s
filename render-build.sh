@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# render-build.sh - Versão que não usa apt-get
 set -o errexit
 
-# Diretório para cache
 CACHE_DIR=/opt/render/project/.render
 
-# Baixa Chrome (apenas se não estiver em cache)
-if [ ! -f $CACHE_DIR/chrome/chrome ]; then
+# Baixa Chrome
+if [ ! -f $CACHE_DIR/chrome/chrome-linux64/chrome ]; then
   echo "📦 Baixando Chrome..."
   mkdir -p $CACHE_DIR/chrome
   cd $CACHE_DIR/chrome
@@ -16,7 +14,7 @@ if [ ! -f $CACHE_DIR/chrome/chrome ]; then
   cd ~
 fi
 
-# Baixa ChromeDriver (apenas se não estiver em cache)
+# Baixa ChromeDriver
 if [ ! -f $CACHE_DIR/chromedriver/chromedriver ]; then
   echo "📦 Baixando ChromeDriver..."
   mkdir -p $CACHE_DIR/chromedriver
@@ -25,12 +23,4 @@ if [ ! -f $CACHE_DIR/chromedriver/chromedriver ]; then
   unzip -q chromedriver-linux64.zip
   rm chromedriver-linux64.zip
   mv chromedriver-linux64/chromedriver .
-  rm -rf chromedriver-linux64
-  cd ~
-fi
-
-# Instala dependências Python
-echo "📦 Instalando dependências Python..."
-pip install -r requirements.txt
-
-echo "✅ Build concluído!"
+  rm -rf
